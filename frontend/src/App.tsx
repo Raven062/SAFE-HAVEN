@@ -3,9 +3,11 @@ import { WalletProvider, useWallet } from './context/WalletContext'
 import { NetworkProvider } from './context/NetworkContext'
 import { SecurityProvider } from './context/SecurityContext'
 import { useContractInfo } from './hooks/useContractInfo'
+import { useVersionCheck } from './hooks/useVersionCheck'
 import { Header } from './components/Header'
 import { TabNav } from './components/TabNav'
 import { WalletInfoModal } from './components/WalletInfoModal'
+import { VersionWarningBanner } from './components/VersionWarningBanner'
 import { Dashboard } from './pages/Dashboard'
 import { DepositPage } from './pages/DepositPage'
 import { WithdrawPage } from './pages/WithdrawPage'
@@ -31,6 +33,7 @@ function AppInner() {
   const [activeTab, setActiveTab] = useState<PageTab>('dashboard')
   const { wallet } = useWallet()
   const contractInfo = useContractInfo()
+  const { result: versionCheck } = useVersionCheck()
 
   const isAdmin = !!(wallet && contractInfo.admin && wallet.address === contractInfo.admin)
 
@@ -42,6 +45,7 @@ function AppInner() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header isPaused={contractInfo.paused} />
+      {versionCheck && <VersionWarningBanner result={versionCheck} />}
       <PausedNotice />
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-4 md:py-8">

@@ -4,10 +4,11 @@ import { useWallet } from '../context/WalletContext'
 import { useContractLogs } from '../context/ContractLogsContext'
 import { TxStatusBadge } from '../components/TxStatusBadge'
 import { TwoFAVerification } from '../components/TwoFAVerification'
+import { WithdrawalConfirmation } from '../components/WithdrawalConfirmation'
 import { buildWithdraw, buildCancelDeposit, submitTx, getVault, getTimeRemaining } from '../lib/stellar'
 import { stroopsToXlm, formatUnlockDate, formatCountdown, formatBps } from '../lib/format'
 import { useTokenSymbol } from '../hooks/useTokenSymbol'
-import type { TxStatus, VaultEntry } from '../types'
+import type { TxStatus, VaultEntry, Deposit } from '../types'
 
 type LookedUpEntry = VaultEntry & {
   timeRemaining: number
@@ -27,6 +28,10 @@ export function WithdrawPage() {
   const [txStatus, setTxStatus] = useState<TxStatus>('idle')
   const [txHash,   setTxHash]   = useState<string | undefined>()
   const [txError,  setTxError]  = useState<string | undefined>()
+
+  // Confirmation modal state
+  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [pendingMethod, setPendingMethod] = useState<'withdraw' | 'cancel' | null>(null)
 
   // Guard against concurrent execute() calls (e.g. rapid double-click or
   // two buttons triggered in quick succession).
@@ -128,19 +133,25 @@ export function WithdrawPage() {
     if (!wallet || !lookedUp) return
     // Prevent a second in-flight operation from clobbering shared tx state.
     if (executing.current) return
+
+    // Show confirmation modal
+    setPendingMethod(method)
+    setShowConfirmation(true)
+  }
+
+  async function handleConfirmWithdrawal() {
+    if (!wallet || !lookedUp || !pendingMethod) return
+    if (executing.current) return
     executing.current = true
 
+    setShowConfirmation(false)
     const id = parseInt(depositId, 10)
+    await executeTransaction(pendingMethod, id)
+  }
 
-    // Check if 2FA is required
-    if (twoFAState.enabled) {
-      setPendingMethod(method)
-      setShow2FA(true)
-      return
-    }
-
-    // Proceed without 2FA
-    await executeTransaction(method, id)
+  function handleCancelConfirmation() {
+    setShowConfirmation(false)
+    setPendingMethod(null)
   }
 
   async function executeTransaction(method: 'withdraw' | 'cancel', depositId: number) {
@@ -236,12 +247,27 @@ export function WithdrawPage() {
   const tokenLabel = tokenSymbol
     ?? (symbolLoading ? '…' : lookedUp ? `${lookedUp.token.slice(0, 6)}…` : '')
 
-  // Price data
-  const priceData = isXlm ? getPrice('native') : null
-  const priceUsd = priceData?.usd
-  const priceUpdateStr = priceData ? formatPriceUpdate(priceData.lastUpdated) : null
+  // Convert lookedUp to Deposit type for modal
+  const depositForModal: Deposit | null = lookedUp && depositId ? {
+    ...lookedUp,
+    depositId: parseInt(depositId, 10),
+  } : null
 
   return (
+    <>
+      {/* Withdrawal Confirmation Modal */}
+      {showConfirmation && depositForModal && (
+        <WithdrawalConfirmation
+          isOpen={showConfirmation}
+          deposit={depositForModal}
+          recipient={wallet?.address}
+          estimatedGas="~0.0001 XLM"
+          onConfirm={handleConfirmWithdrawal}
+          onCancel={handleCancelConfirmation}
+        />
+      )}
+
+      {/* Main content */}
     <div className="max-w-lg mx-auto space-y-4 md:space-y-5">
       {/* Lookup form */}
       <div className="card p-4 md:p-6">
@@ -360,7 +386,8 @@ export function WithdrawPage() {
           )}
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
 

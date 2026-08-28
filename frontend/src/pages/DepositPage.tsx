@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
 import { useWallet } from '../context/WalletContext'
 import { useContractLogs } from '../context/ContractLogsContext'
+import { useDeposits } from '../hooks/useDeposits'
 import { TxStatusBadge } from '../components/TxStatusBadge'
 import { LockByLedgerForm } from '../components/LockByLedgerForm'
 import { SubmitTimeoutBanner } from '../components/SubmitTimeoutBanner'
+import { DuplicateDepositWarning, isDuplicateWarningsDisabled, isDepositDismissed, findDuplicateDeposits } from '../components/DuplicateDepositWarning'
 import { useSubmitTimeout, TimeoutError } from '../hooks/useSubmitTimeout'
 import { buildDeposit, submitTx, getTokenDecimals, getTokenMetadata } from '../lib/stellar'
 import { formatBps, formatDuration, dateTimeLocalToUnixSeconds, getMinDateTimeLocal, formatUnlockTimestampWithTimezone, getTimezoneOffsetString, amountToBaseUnits, baseUnitsToAmount, isValidContractAddress, validateTokenAddress } from '../lib/format'
@@ -23,6 +25,7 @@ interface DepositPageProps {
 export function DepositPage({ contractInfo, onSuccess }: DepositPageProps) {
   const { wallet, isRestoringSession, signTransaction } = useWallet()
   const { addLog, updateLog } = useContractLogs()
+  const { deposits, loading: depositsLoading } = useDeposits(wallet?.address ?? null)
 
   // Deposit tab state
   const [depositTab, setDepositTab] = useState<DepositTab>('timestamp')
@@ -35,6 +38,10 @@ export function DepositPage({ contractInfo, onSuccess }: DepositPageProps) {
   const [txStatus, setTxStatus] = useState<TxStatus>('idle')
   const [txHash,   setTxHash]   = useState<string | undefined>()
   const [txError,  setTxError]  = useState<string | undefined>()
+
+  // Duplicate warning modal state
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false)
+  const [duplicateDeposits, setDuplicateDeposits] = useState<typeof deposits>([])
 
   // Whether the last submission attempt timed out (drives the banner retry UI).
   const [timedOut, setTimedOut] = useState(false)
@@ -157,6 +164,35 @@ export function DepositPage({ contractInfo, onSuccess }: DepositPageProps) {
     e.preventDefault()
     if (!wallet || !isValid) return
 
+    // Check for duplicates before proceeding
+    const amountBaseUnits = amountToBaseUnits(amount, tokenDecimals)
+    const pendingDeposit = {
+      token: tokenAddress,
+      amount: amountBaseUnits,
+      unlockTime: unlockTimestamp,
+      penaltyBps: penaltyBpsNum,
+    }
+
+    // Skip duplicate check if globally disabled or this specific deposit was dismissed
+    const skipCheck = isDuplicateWarningsDisabled() || isDepositDismissed(pendingDeposit)
+    
+    if (!skipCheck && !depositsLoading) {
+      const duplicates = findDuplicateDeposits(deposits, pendingDeposit)
+      
+      if (duplicates.length > 0) {
+        setDuplicateDeposits(duplicates)
+        setShowDuplicateWarning(true)
+        return // Stop submission, wait for user decision
+      }
+    }
+
+    // Proceed with submission
+    await executeDeposit()
+  }
+
+  async function executeDeposit() {
+    if (!wallet) return
+
     setTxStatus('signing')
     setTxError(undefined)
     setTxHash(undefined)
@@ -257,6 +293,22 @@ export function DepositPage({ contractInfo, onSuccess }: DepositPageProps) {
     }
   }
 
+  function handleDuplicateProceed(_suppressFuture: boolean) {
+    setShowDuplicateWarning(false)
+    // Proceed with deposit submission
+    void executeDeposit()
+  }
+
+  function handleDuplicateModify() {
+    setShowDuplicateWarning(false)
+    // Keep form open for user to modify
+  }
+
+  function handleDuplicateCancel() {
+    setShowDuplicateWarning(false)
+    // Just close the modal, stay on form
+  }
+
   const isPending = txStatus === 'signing' || txStatus === 'submitting' || txStatus === 'confirming'
 
   // Retry the last submission with the same form data (no re-entry needed).
@@ -275,7 +327,24 @@ export function DepositPage({ contractInfo, onSuccess }: DepositPageProps) {
   }
 
   return (
-    <div className="max-w-lg mx-auto">
+    <>
+      {/* Duplicate Warning Modal */}
+      <DuplicateDepositWarning
+        isOpen={showDuplicateWarning}
+        pendingDeposit={{
+          token: tokenAddress,
+          amount: amountToBaseUnits(amount || '0', tokenDecimals),
+          unlockTime: unlockTimestamp,
+          penaltyBps: penaltyBpsNum,
+        }}
+        duplicates={duplicateDeposits}
+        onProceed={handleDuplicateProceed}
+        onModify={handleDuplicateModify}
+        onCancel={handleDuplicateCancel}
+      />
+
+      {/* Main Content */}
+      <div className="max-w-lg mx-auto">
       {/* Tab Navigation */}
       <div className="mb-6 flex gap-2">
         <button
@@ -477,7 +546,8 @@ export function DepositPage({ contractInfo, onSuccess }: DepositPageProps) {
 
       {/* Ledger-based Deposit Form */}
       {depositTab === 'ledger' && <LockByLedgerForm contractInfo={contractInfo} onSuccess={onSuccess} />}
-    </div>
+      </div>
+    </>
   )
 }
 

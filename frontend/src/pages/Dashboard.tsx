@@ -4,9 +4,10 @@ import { useDeposits } from '../hooks/useDeposits'
 import type { ContractInfo } from '../App'
 import { DepositCard } from '../components/DepositCard'
 import { TxStatusBadge } from '../components/TxStatusBadge'
+import { WithdrawalConfirmation } from '../components/WithdrawalConfirmation'
 import { buildWithdraw, buildCancelDeposit, submitTx } from '../lib/stellar'
 import { shortAddr } from '../lib/format'
-import type { TxStatus } from '../types'
+import type { TxStatus, Deposit } from '../types'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 
@@ -23,84 +24,34 @@ export function Dashboard({ contractInfo }: DashboardProps) {
   const [txError,  setTxError]  = useState<string | undefined>()
   const [pendingId, setPendingId] = useState<number | null>(null)
 
+  // Confirmation modal state
+  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [pendingDeposit, setPendingDeposit] = useState<Deposit | null>(null)
+  const [pendingAction, setPendingAction] = useState<'withdraw' | 'cancel' | null>(null)
+
   async function handleWithdraw(depositId: number) {
-    if (!wallet) return
-    setPendingId(depositId)
-    setTxStatus('signing')
-    setTxError(undefined)
-    setTxHash(undefined)
-
-    // Add pending log entry
-    const logId = addLog({
-      operation: 'withdraw',
-      status: 'pending',
-      initiator: wallet.address,
-      parameters: { depositId },
-    })
-
-    try {
-      const xdr = await buildWithdraw(wallet.address, depositId)
-      if (!xdr) throw new Error('Failed to build transaction')
-
-      const sigResult = await signTransaction(xdr)
-      
-      // Handle the three signing outcomes
-      if (sigResult.signed) {
-        // Success: proceed with submission
-        setTxStatus('submitting')
-        const result = await submitTx(sigResult.xdr)
-
-        if (result.success) {
-          setTxStatus('success')
-          setTxHash(result.txHash)
-          updateLog(logId, {
-            status: 'success',
-            txHash: result.txHash,
-          })
-          toast.success('Withdrawal successful!')
-          // Poll for individual deposit removal instead of full refresh
-          await pollRemoveDeposit(depositId)
-        } else {
-          setTxStatus('error')
-          setTxError(result.error)
-          updateLog(logId, {
-            status: 'error',
-            errorMessage: result.error,
-          })
-          toast.error(result.error ?? 'Withdrawal failed')
-        }
-      } else if (sigResult.rejected) {
-        // User rejected: silently reset state
-        setTxStatus('idle')
-        updateLog(logId, {
-          status: 'error',
-          errorMessage: 'User rejected the transaction',
-        })
-      } else {
-        // Signing error: already toasted, but still reset state
-        setTxStatus('idle')
-        updateLog(logId, {
-          status: 'error',
-          errorMessage: sigResult.error,
-        })
-      }
-      return
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Unexpected error'
-      setTxStatus('error')
-      setTxError(msg)
-      updateLog(logId, {
-        status: 'error',
-        errorMessage: msg,
-      })
-      toast.error(msg)
-    } finally {
-      setPendingId(null)
-    }
+    const deposit = deposits.find(d => d.depositId === depositId)
+    if (!deposit) return
+    
+    setPendingDeposit(deposit)
+    setPendingAction('withdraw')
+    setShowConfirmation(true)
   }
 
   async function handleCancel(depositId: number) {
-    if (!wallet) return
+    const deposit = deposits.find(d => d.depositId === depositId)
+    if (!deposit) return
+    
+    setPendingDeposit(deposit)
+    setPendingAction('cancel')
+    setShowConfirmation(true)
+  }
+
+  async function handleConfirmWithdrawal() {
+    if (!wallet || !pendingDeposit || !pendingAction) return
+
+    setShowConfirmation(false)
+    const depositId = pendingDeposit.depositId
     setPendingId(depositId)
     setTxStatus('signing')
     setTxError(undefined)
@@ -108,14 +59,17 @@ export function Dashboard({ contractInfo }: DashboardProps) {
 
     // Add pending log entry
     const logId = addLog({
-      operation: 'cancel_deposit',
+      operation: pendingAction === 'withdraw' ? 'withdraw' : 'cancel_deposit',
       status: 'pending',
       initiator: wallet.address,
       parameters: { depositId },
     })
 
     try {
-      const xdr = await buildCancelDeposit(wallet.address, depositId)
+      const xdr = pendingAction === 'withdraw'
+        ? await buildWithdraw(wallet.address, depositId)
+        : await buildCancelDeposit(wallet.address, depositId)
+        
       if (!xdr) throw new Error('Failed to build transaction')
 
       const sigResult = await signTransaction(xdr)
@@ -133,7 +87,7 @@ export function Dashboard({ contractInfo }: DashboardProps) {
             status: 'success',
             txHash: result.txHash,
           })
-          toast.success('Deposit cancelled.')
+          toast.success(pendingAction === 'withdraw' ? 'Withdrawal successful!' : 'Deposit cancelled.')
           // Poll for individual deposit removal instead of full refresh
           await pollRemoveDeposit(depositId)
         } else {
@@ -143,7 +97,7 @@ export function Dashboard({ contractInfo }: DashboardProps) {
             status: 'error',
             errorMessage: result.error,
           })
-          toast.error(result.error ?? 'Cancel failed')
+          toast.error(result.error ?? `${pendingAction === 'withdraw' ? 'Withdrawal' : 'Cancel'} failed`)
         }
       } else if (sigResult.rejected) {
         // User rejected: silently reset state
@@ -160,7 +114,6 @@ export function Dashboard({ contractInfo }: DashboardProps) {
           errorMessage: sigResult.error,
         })
       }
-      return
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unexpected error'
       setTxStatus('error')
@@ -172,8 +125,19 @@ export function Dashboard({ contractInfo }: DashboardProps) {
       toast.error(msg)
     } finally {
       setPendingId(null)
+      setPendingDeposit(null)
+      setPendingAction(null)
     }
   }
+
+  function handleCancelConfirmation() {
+    setShowConfirmation(false)
+    setPendingDeposit(null)
+    setPendingAction(null)
+  }
+
+  // Old withdraw handler removed - now using confirmation modal
+  // Old cancel handler removed - now using confirmation modal
 
   if (!wallet && !isRestoringSession) {
     return (
@@ -223,7 +187,21 @@ export function Dashboard({ contractInfo }: DashboardProps) {
   }
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <>
+      {/* Withdrawal Confirmation Modal */}
+      {showConfirmation && pendingDeposit && (
+        <WithdrawalConfirmation
+          isOpen={showConfirmation}
+          deposit={pendingDeposit}
+          recipient={wallet?.address}
+          estimatedGas="~0.0001 XLM"
+          onConfirm={handleConfirmWithdrawal}
+          onCancel={handleCancelConfirmation}
+        />
+      )}
+
+      {/* Main content */}
+      <div className="space-y-4 md:space-y-6">
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
         {loading && deposits.length === 0 ? (
@@ -302,7 +280,7 @@ export function Dashboard({ contractInfo }: DashboardProps) {
           </div>
         )}
       </div>
-    </div>
+    </>
   )
 }
 

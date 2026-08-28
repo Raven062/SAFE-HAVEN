@@ -50,6 +50,8 @@ function parseVaultEntry(scVal: xdr.ScVal): VaultEntry | null {
       unlockTime: Number(raw['unlock_time']),
       depositor:  raw['depositor']   as string,
       penaltyBps: Number(raw['penalty_bps']),
+      compoundFrequencySecs: Number(raw['compound_frequency_secs'] ?? 0),
+      lastAccrualTimestamp: Number(raw['last_accrual_timestamp'] ?? 0),
     }
   } catch {
     return null

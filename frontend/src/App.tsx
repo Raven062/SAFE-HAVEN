@@ -11,6 +11,7 @@ import { VersionWarningBanner } from './components/VersionWarningBanner'
 import { Dashboard } from './pages/Dashboard'
 import { DepositPage } from './pages/DepositPage'
 import { WithdrawPage } from './pages/WithdrawPage'
+import { YieldDashboard } from './pages/YieldDashboard'
 import { SettingsPage } from './pages/SettingsPage'
 import { AdminPage } from './pages/AdminPage'
 import { ContractExplorer } from './pages/ContractExplorer'
@@ -56,6 +57,7 @@ function AppInner() {
               {activeTab === 'dashboard' && 'My Vaults'}
               {activeTab === 'deposit'   && 'New Deposit'}
               {activeTab === 'withdraw'  && 'Withdraw'}
+              {activeTab === 'yield'     && 'Yield Dashboard'}
               {activeTab === 'settings'  && 'Settings'}
               {activeTab === 'admin'     && 'Admin Panel'}
               {activeTab === 'logs'      && 'Contract Operations Log'}
@@ -64,6 +66,7 @@ function AppInner() {
               {activeTab === 'dashboard' && 'View and manage all your time-locked deposits'}
               {activeTab === 'deposit'   && 'Lock tokens until a future date'}
               {activeTab === 'withdraw'  && 'Withdraw unlocked tokens or cancel early'}
+              {activeTab === 'yield'     && 'Track your compound interest earnings'}
               {activeTab === 'settings'  && 'Manage recovery contacts and account protection'}
               {activeTab === 'admin'     && 'Contract administration controls'}
               {activeTab === 'logs'      && 'Track all contract operations and transactions'}
@@ -84,6 +87,9 @@ function AppInner() {
         )}
         {activeTab === 'withdraw' && (
           <WithdrawPage />
+        )}
+        {activeTab === 'yield' && (
+          <YieldDashboard />
         )}
         {activeTab === 'settings' && (
           <SettingsPage />

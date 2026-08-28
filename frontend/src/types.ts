@@ -9,6 +9,8 @@ export interface VaultEntry {
   unlockTime: number  // Unix timestamp (seconds)
   depositor: string   // Stellar address
   penaltyBps: number  // 0–10_000 (basis points)
+  compoundFrequencySecs: number  // Compound interest frequency (0 = no compounding)
+  lastAccrualTimestamp: number   // Last compound accrual timestamp
 }
 
 /** Available ways to plan a withdrawal */
@@ -42,7 +44,7 @@ export interface WalletInfo {
 }
 
 /** Tab pages */
-export type PageTab = 'dashboard' | 'deposit' | 'withdraw' | 'settings' | 'admin'
+export type PageTab = 'dashboard' | 'deposit' | 'withdraw' | 'yield' | 'settings' | 'admin'
 
 export type RecoveryContactType = 'email' | 'wallet'
 
